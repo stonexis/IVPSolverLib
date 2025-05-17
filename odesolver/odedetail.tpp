@@ -98,26 +98,100 @@ namespace ode{
         S* __restrict y2dat = y2.data();
         const S* __restrict xdat = x.data();
 
-        constexpr std::size_t maxiter = 2;
+        constexpr std::size_t maxiter = 4;
     
+        const S h_2 = h / 2.0; //Предвычисление
         for (std::size_t k = 1; k < size; ++k) {
-            //Предиктор (так же простой Эйлер)
-            y1dat[k] = y1dat[k-1] + h * y2dat[k-1];
-            y2dat[k] = y2dat[k-1] + h * F(xdat[k-1], y1dat[k-1], y2dat[k-1]);
-            //Поскольку RK опериурет усреднение между старым и новым значением (метод трапеций), необходимо сохранять старые значения
-            S y1_new = y1dat[k];
-            S y2_new = y2dat[k];
-            //Корректор
-            const S h_2 = h/2; //Предвычисление
-            #pragma omp simd aligned(xdat,y1dat,y2dat:64) //Можно использовать векторизацию
-            for(std::size_t i = 0; i < maxiter; i++){
-                S y1_old = y1_new;
-                S y2_old = y2_new;
-                y1_new = y1dat[k-1] + h_2 * (y2_old + y2_new);
-                y2_new = y2dat[k-1] + h_2 * (F(xdat[k-1], y1_old, y2_old) + F(xdat[k], y1_new, y2_new));   
-            }
-            y1dat[k]=y1_new; 
-            y2dat[k]=y2_new;
+            //Коэффициенты рунге-кутты
+            S k1_1 = h * y2dat[k-1];
+            S k1_2 = h * F(xdat[k-1], y1dat[k-1], y2dat[k-1]);
+
+            S k2_1 = h * (y2dat[k-1] + k1_2 / 2.0);
+            S k2_2 = h * F(xdat[k-1] + h_2, y1dat[k-1] + k1_1 / 2.0, y2dat[k-1] + k1_2 / 2.0);
+
+            y1dat[k] = y1dat[k-1] + k2_1;
+            y2dat[k] = y2dat[k-1] + k2_2;
+            
+        }
+
+    }
+
+    template<class Span, class Rhs>
+    void RK4Stepper<Span, Rhs>::operator()(
+                                        Span x, Span y1, Span y2,
+                                        const Rhs& F,
+                                        typename Span::Scalar q0,
+                                        typename Span::Scalar q1
+                                    ) const{
+        using S = typename Span::Scalar;
+        const std::size_t size = x.size();
+        const S h = std::abs(x[1] - x[0]);
+
+        y1[0] = q0;
+        y2[0] = q1;
+
+        //Создаем беспсевдонимный тип (disable alias type) для потенциального ускорения
+        S* __restrict y1dat = y1.data();
+        S* __restrict y2dat = y2.data();
+        const S* __restrict xdat = x.data();
+        
+        const S h_2 = h / 2.0; //Предвычисление
+        for (std::size_t k = 1; k < size; ++k) {
+            //Коэффициенты рунге-кутты
+            S k1_1 = h * y2dat[k-1];
+            S k1_2 = h * F(xdat[k-1], y1dat[k-1], y2dat[k-1]);
+
+            S k2_1 = h * (y2dat[k-1] + k1_2 / 2.0);
+            S k2_2 = h * F(xdat[k-1] + h_2, y1dat[k-1] + k1_1 / 2.0, y2dat[k-1] + k1_2 / 2.0);
+
+            S k3_1 = h * (y2dat[k-1] + k2_2 / 2.0);
+            S k3_2 = h * F(xdat[k-1] + h_2, y1dat[k-1] + k2_1 / 2.0, y2dat[k-1] + k2_2 / 2.0);
+
+            S k4_1 = h * (y2dat[k-1] + k3_2);
+            S k4_2 = h * F(xdat[k-1] + h, y1dat[k-1] + k3_1, y2dat[k-1] + k3_2);
+
+            y1dat[k] = y1dat[k-1] + (k1_1 + 2.0 * k2_1 + 2.0 * k3_1 + k4_1) / 6.0;
+            y2dat[k] = y2dat[k-1] + (k1_2 + 2.0 * k2_2 + 2.0 * k3_2 + k4_2) / 6.0;
+            
+        }
+
+    }
+
+    template<class Span, class Rhs>
+    void AdamsStepper<Span, Rhs>::operator()(
+                                        Span x, Span y1, Span y2,
+                                        const Rhs& F,
+                                        typename Span::Scalar q0,
+                                        typename Span::Scalar q1
+                                    ) const{
+        using S = typename Span::Scalar;
+        const std::size_t size = x.size();
+        const S h = std::abs(x[1] - x[0]);
+
+        y1[0] = q0;
+        y2[0] = q1;
+
+        //Создаем беспсевдонимный тип (disable alias type) для потенциального ускорения
+        S* __restrict y1dat = y1.data();
+        S* __restrict y2dat = y2.data();
+        const S* __restrict xdat = x.data();
+        const S h_2 = h / 2.0;
+        //Разгон адамса РК2
+        for(std::size_t k = 1; k < 4; ++k){
+            S k1_1 = h * y2dat[k-1];
+            S k1_2 = h * F(xdat[k-1], y1dat[k-1], y2dat[k-1]);
+
+            S k2_1 = h * (y2dat[k-1] + k1_2 / 2.0);
+            S k2_2 = h * F(xdat[k-1] + h_2, y1dat[k-1] + k1_1 / 2.0, y2dat[k-1] + k1_2 / 2.0);
+
+            y1dat[k] = y1dat[k-1] + k2_1;
+            y2dat[k] = y2dat[k-1] + k2_2;
+        }
+        //Адамс
+        for (std::size_t k = 3; k < size; ++k) {
+            y1dat[k] = y1dat[k-1] + (h / 12.0) * (23.0 * y2dat[k-1] - 16.0 * y2dat[k-2] + 5.0 * y2dat[k-3]);
+            y2dat[k] = y2dat[k-1] + (h / 12.0) * (23.0 * F(xdat[k-1], y1dat[k-1], y2dat[k-1]) - 16.0 * F(xdat[k-2], y1dat[k-2], y2dat[k-2]) + 5.0 * F(xdat[k-3], y1dat[k-3], y2dat[k-3]));
+            
         }
 
     }
@@ -136,92 +210,117 @@ namespace ode{
                                     Kernel&& kernel
                                 ){
         using Scalar = typename Span::Scalar;
-        static_assert(ExpDim % 2 == 0, "ExpDim must be divisible by 2");
-        if (eps_tol < Scalar(1e-6))
+        static_assert(ExpDim % 2 != 0, "ExpDim dont be divisible by 2");
+        if (eps_tol < Scalar(1e-8))
             throw std::invalid_argument("eps_tol must be > 1e-10");
 
         constexpr std::size_t ratio = 2; //Изменение шага происходит посредством умножения на 2 количества узлов сетки (не размера шага)
-        constexpr std::size_t max_iter = 10;
+        const std::size_t max_iter = 20;
 
         //Буфер для каждой сетки
-        AlignedBuffer<Scalar> x_buf(ExpDim);
-        AlignedBuffer<Scalar> y_buf(ExpDim);
-        AlignedBuffer<Scalar> yd_buf(ExpDim);
+        AlignedBuffer<Scalar> xh_buf(ExpDim);
+        AlignedBuffer<Scalar> yh_buf(ExpDim);
+        AlignedBuffer<Scalar> ydh_buf(ExpDim);
 
-        AlignedBuffer<Scalar> x2_buf(ExpDim / 2);
-        AlignedBuffer<Scalar> y2_buf(ExpDim / 2);
-        AlignedBuffer<Scalar> yd2_buf(ExpDim / 2);
+        std::size_t size_grid_h2 = ratio * (ExpDim - 1) + 1;
 
-        auto fill_grid = [](Span g, Scalar a, Scalar b){
-            const std::size_t size = g.size();
-            Scalar h = std::abs(b - a) / (size - 1);
-            for (std::size_t i = 0; i < size; ++i) 
-                g[i] = a + i*h;
-        };
+        AlignedBuffer<Scalar> xh2_buf(size_grid_h2);
+        AlignedBuffer<Scalar> yh2_buf(size_grid_h2);
+        AlignedBuffer<Scalar> ydh2_buf(size_grid_h2);
 
         //Обертка для каждой сетки для удобных манипуляций (хранение сохраняется в буфере)
-        Span x(x_buf.data(), x_buf.size());
-        Span y(y_buf.data(), y_buf.size());
-        Span yd(yd_buf.data(), yd_buf.size());
+        Span xh(xh_buf.data(), xh_buf.size());
+        Span yh(yh_buf.data(), yh_buf.size());
+        Span ydh(ydh_buf.data(), ydh_buf.size());
 
-        Span x2(x2_buf.data(), x2_buf.size());
-        Span y2(y2_buf.data(), y2_buf.size());
-        Span yd2(yd2_buf.data(), yd2_buf.size());
+        Span xh2(xh2_buf.data(), xh2_buf.size());
+        Span yh2(yh2_buf.data(), yh2_buf.size());
+        Span ydh2(ydh2_buf.data(), ydh2_buf.size());
 
         //Заполняем сетки 
-        fill_grid(x, a, b);
-        fill_grid(x2, a, b);
-
-        //Первое решение необходимо на сетке x2 для проверки (в дальнейшем создается только на сетке x), x2 получаем от старых swap
-        kernel(x2, y2, yd2, F, q0, q1);
-
+        utils::fill_uniform_grid(xh, a, b);
+        utils::fill_uniform_grid(xh2, a, b);
+        
+        kernel(xh, yh, ydh, F, q0, q1);
+        
         bool success = false;
-        std::size_t grid_size = ExpDim;
-
+        #pragma GCC unroll 4 //Запрещаем разворот цикла более чем на 4, поскольку внутри много template-swap => на O3 проблемы на этапе линковки
         for (std::size_t iter = 0; iter < max_iter; ++iter) {
-            kernel(x, y, yd, F, q0, q1);
-            if (utils::check_richardson_criterion(y, yd, y2, yd2, eps_tol, kernel.order)){ 
+            kernel(xh2, yh2, ydh2, F, q0, q1);
+            if (utils::check_richardson_criterion(yh2, ydh2, yh, ydh, eps_tol, kernel.order)){ 
                 success = true; 
                 break; 
             }
+            else if (iter == max_iter - 1){ //Если неуспех на последней итерации, делать свап и дробить дальше сетку незачем, результат проверить не получится 
+                success = false;
+                break;
+            }
             //Критерий не пройден, измельчаем крупную сетку(посредством swap - старая мелкая становится крупной большой)
             //Сначала перекидываем обертки, затем хранилища
-            std::swap(x, x2);  
-            std::swap(y, y2);
-            std::swap(yd, yd2);
+            std::swap(xh2, xh);  
+            std::swap(yh2, yh);
+            std::swap(ydh2, ydh);
 
             //Старая крупная сетка автоматически удалится поскольку память лежит в unique_ptr
-            std::swap(x_buf, x2_buf);
-            std::swap(y_buf, y2_buf);
-            std::swap(yd_buf, yd2_buf);
+            std::swap(xh2_buf, xh_buf);
+            std::swap(yh2_buf, yh_buf);
+            std::swap(ydh2_buf, ydh_buf);
 
             //Измельчаем мелкую сетку (тут уже обычное увеличение числа узлов)
-            grid_size *= ratio;
-
+            size_grid_h2 = ratio * (size_grid_h2 - 1) + 1;
             //Изменяем размер буферов(перевыделение памяти)
-            x_buf.resize(grid_size);
-            y_buf.resize(grid_size);
-            yd_buf.resize(grid_size);
+            xh2_buf.resize(size_grid_h2);
+            yh2_buf.resize(size_grid_h2);
+            ydh2_buf.resize(size_grid_h2);
 
             //Корректируем обертки
-            x = {x_buf.data(), grid_size};
-            y = {y_buf.data(), grid_size};
-            yd = {yd_buf.data(), grid_size};
+            xh2 = {xh2_buf.data(), size_grid_h2};
+            yh2 = {yh2_buf.data(), size_grid_h2};
+            ydh2 = {ydh2_buf.data(), size_grid_h2};
 
             //После подготовки заполняем сетку 
-            fill_grid(x, a, b);
+            utils::fill_uniform_grid(xh2, a, b);
         }
 
         ReturnBuffer<Span> res{
-            .x_buf  = std::move(x2_buf),
-            .y1_buf = std::move(y2_buf),
-            .y2_buf = std::move(yd2_buf),
-            .success= true
+            .x_buf  = std::move(xh_buf),
+            .y1_buf = std::move(yh_buf),
+            .y2_buf = std::move(ydh_buf),
+            .success= success
         };
         return res;
 }
-    
+    template<std::size_t GridDim, class Span, class Rhs, class Kernel>
+    ReturnBuffer<Span> integrate_freeze(
+                                    const Rhs&  F,
+                                    typename Span::Scalar a,
+                                    typename Span::Scalar b,
+                                    typename Span::Scalar q0,
+                                    typename Span::Scalar q1,
+                                    Kernel&& kernel
+                                ){
+    using Scalar = typename Span::Scalar;
 
+    AlignedBuffer<Scalar> xh_buf(GridDim);
+    AlignedBuffer<Scalar> yh_buf(GridDim);
+    AlignedBuffer<Scalar> ydh_buf(GridDim);
+
+    Span xh(xh_buf.data(), xh_buf.size());
+    Span yh(yh_buf.data(), yh_buf.size());
+    Span ydh(ydh_buf.data(), ydh_buf.size());
+
+    utils::fill_uniform_grid(xh, a, b);
+    kernel(xh, yh, ydh, F, q0, q1);
+
+    ReturnBuffer<Span> res{
+        .x_buf  = std::move(xh_buf),
+        .y1_buf = std::move(yh_buf),
+        .y2_buf = std::move(ydh_buf),
+        .success= true
+    };
+    return res;
+    
+}
 
 
 
@@ -246,8 +345,9 @@ namespace utils {
                             std::size_t           q        
                         ){
         using S = typename Span::Scalar;
-        const std::size_t powq = std::pow(S(q), S(order)); // q^p предвычисление
+        const S powq = std::pow(S(q), S(order)); // q^p предвычисление
         const std::size_t small_size = Y2h.size();
+        const std::size_t big_size = Yh.size();
         
         //Создаем беспсевдонимный тип (disable alias type) для потенциального ускорения
         const S* __restrict big   = Yh.data();
@@ -260,17 +360,20 @@ namespace utils {
         //Параллелизм на уровне данных (Векторизация), так же сообщаем что данные уже выровнены, и инициализируем сумму нулем, каждый векторный сегмент сложит туда свой результат
         #pragma omp simd aligned(big,big_d,sml,sml_d:64) reduction(+:diff_func,diff_der)
         for (std::size_t i = 0; i < small_size; ++i) {
+            std::size_t j = i*q;
             diff_func += std::abs(big[i*q]   - sml  [i]); //Сумма модулей разностей компонент сеток функций (из большей сетки берутся значения с пропуском q)
             diff_der  += std::abs(big_d[i*q] - sml_d[i]); //Сумма модулей разностей компонент сеток производных (из большей сетки берутся значения с пропуском q)
+            
         }
-
-        diff_func /= ((powq - S(1)) * small_size); //||Y_h - Y_2h||/N(q^p - 1)
-        diff_der  /= ((powq - S(1))* small_size);
-
-        return std::max(diff_func, diff_der) <= tol;
+        
+        //||Y_h - Y_2h||/(q^p - 1)
+        S err  = diff_func   / ( S(big_size-1) * (powq - S(1)));
+        S errd = diff_der / ( S(big_size-1) * (powq - S(1))); 
+       
+        return err <= tol; //Можно заменить на максимум из err errd для отслеживания точности производной
     }
 
-
+    
 
 
 

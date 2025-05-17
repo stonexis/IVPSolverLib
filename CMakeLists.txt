@@ -9,23 +9,23 @@ include(FetchContent)
 set(INSTALL_GTEST OFF)
 set(gtest_build_tests OFF)
 # --- GoogleTest ---
-FetchContent_Declare(
-  googletest
-  URL https://github.com/google/googletest/archive/refs/heads/main.zip
-  DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-)
-FetchContent_MakeAvailable(googletest)
+# FetchContent_Declare(
+#   googletest
+#   URL https://github.com/google/googletest/archive/refs/heads/main.zip
+#   DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+# )
+# FetchContent_MakeAvailable(googletest)
 
 #--- Google Benchmark ---
-set(BENCHMARK_ENABLE_TESTING        OFF CACHE BOOL "" FORCE)
-set(BENCHMARK_ENABLE_GTEST_TESTS    OFF CACHE BOOL "" FORCE)
-set(BENCHMARK_ENABLE_INSTALL        OFF CACHE BOOL "" FORCE)
-FetchContent_Declare(
-  benchmark
-  URL https://github.com/google/benchmark/archive/refs/heads/main.zip
-  DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-)
-FetchContent_MakeAvailable(benchmark)
+# set(BENCHMARK_ENABLE_TESTING        OFF CACHE BOOL "" FORCE)
+# set(BENCHMARK_ENABLE_GTEST_TESTS    OFF CACHE BOOL "" FORCE)
+# set(BENCHMARK_ENABLE_INSTALL        OFF CACHE BOOL "" FORCE)
+# FetchContent_Declare(
+#   benchmark
+#   URL https://github.com/google/benchmark/archive/refs/heads/main.zip
+#   DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+# )
+# FetchContent_MakeAvailable(benchmark)
 
 add_library(core INTERFACE)
 
@@ -37,6 +37,12 @@ target_include_directories(core INTERFACE
 add_executable(${PROJECT_NAME}
   main.cpp
 )
+
+# set_target_properties(${PROJECT_NAME} PROPERTIES
+#   CXX_STANDARD 20
+#   INTERPROCEDURAL_OPTIMIZATION TRUE
+# )
+
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(${PROJECT_NAME} PRIVATE
@@ -50,6 +56,9 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     -fomit-frame-pointer
   )
 endif()
-
+target_link_options(${PROJECT_NAME} PRIVATE 
+  -fuse-ld=gold
+  -flto
+  )
 
 target_link_libraries(${PROJECT_NAME} PRIVATE core)

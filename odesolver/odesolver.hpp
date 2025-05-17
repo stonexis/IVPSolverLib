@@ -38,7 +38,7 @@ namespace ode{
     * @return Пара сеток y и y'
     */
     template<std::size_t ExpDim, typename Span, class Rhs, class Kernel>
-    ReturnBuffer<Span> integrate_adaptive(
+    [[nodiscard]]ReturnBuffer<Span> integrate_adaptive(
                                         const Rhs&  F,                  
                                         typename Span::Scalar a,  
                                         typename Span::Scalar b,
@@ -47,6 +47,17 @@ namespace ode{
                                         typename Span::Scalar eps_tol,     
                                         Kernel&& kernel                 
                                     );
+    template<std::size_t GridDim, class Span, class Rhs, class Kernel>
+    [[nodiscard]]ReturnBuffer<Span> integrate_freeze(
+                                    const Rhs&  F,
+                                    typename Span::Scalar a,
+                                    typename Span::Scalar b,
+                                    typename Span::Scalar q0,
+                                    typename Span::Scalar q1,
+                                    Kernel&& kernel
+                                );
+
+
 
     //-----------  Ядра ------------------
 
@@ -88,6 +99,30 @@ namespace ode{
                 ) const;
     };
 
+    template<typename Span, class Rhs>
+    struct RK4Stepper {
+        static constexpr std::size_t order = 4;   
+        
+        void operator()(
+                    Span x, Span y1, Span y2,
+                    const Rhs& F,
+                    typename Span::Scalar q0,
+                    typename Span::Scalar q1
+                ) const;
+    };
+
+    template<typename Span, class Rhs>
+    struct AdamsStepper {
+        static constexpr std::size_t order = 3;   
+        
+        void operator()(
+                    Span x, Span y1, Span y2,
+                    const Rhs& F,
+                    typename Span::Scalar q0,
+                    typename Span::Scalar q1
+                ) const;
+    };
+
 } //namespace ode
 
 
@@ -117,6 +152,7 @@ namespace utils{
                                 std::size_t order,
                                 std::size_t q=2        
                             );
+     
 
 
 

@@ -19,6 +19,7 @@ class AlignedBuffer {
         return static_cast<T*>(p);
     }
 public:
+    using Scalar = T;
     AlignedBuffer() = default;
     explicit AlignedBuffer(std::size_t n) : ptr_(alloc(n)), n_(n) {}
     AlignedBuffer(AlignedBuffer&&)            noexcept = default;
@@ -34,4 +35,7 @@ public:
     //Доступ  к данным только через предположение о выравнивании (поскольку они выровнены в этом классе)
     T*       data()       noexcept { return std::assume_aligned<64, T>(ptr_.get()); }
     const T* data() const noexcept { return std::assume_aligned<64, T>(ptr_.get()); }
+
+    T& operator[](std::size_t i)       noexcept { return ptr_[i]; }
+    T  operator[](std::size_t i) const noexcept { return ptr_[i]; }
 };
