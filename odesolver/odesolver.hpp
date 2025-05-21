@@ -47,15 +47,16 @@ namespace ode{
                                         typename Span::Scalar eps_tol,     
                                         Kernel&& kernel                 
                                     );
-    template<std::size_t GridDim, class Span, class Rhs, class Kernel>
+    template<class Span, class Rhs, class Kernel>
     [[nodiscard]]ReturnBuffer<Span> integrate_freeze(
-                                    const Rhs&  F,
-                                    typename Span::Scalar a,
-                                    typename Span::Scalar b,
-                                    typename Span::Scalar q0,
-                                    typename Span::Scalar q1,
-                                    Kernel&& kernel
-                                );
+                                            const Rhs&  F,
+                                            typename Span::Scalar a,
+                                            typename Span::Scalar b,
+                                            typename Span::Scalar q0,
+                                            typename Span::Scalar q1,
+                                            Kernel&& kernel,
+                                            std::size_t grid_size
+                                        );
 
 
 
@@ -124,45 +125,5 @@ namespace ode{
     };
 
 } //namespace ode
-
-
-namespace utils{
-    template <typename Span>
-    inline void fill_uniform_grid(Span& grid, typename Span::Scalar a, typename Span::Scalar b);
-
-    template<class Span>
-    inline void grinding_grid_without_recount(Span grid_old, std::size_t ratio, typename Span::Scalar a, typename Span::Scalar b);
-
-    /**
-    * @brief Функция для проверки критерия Ричардсона ||Y_h - Y_2h||/(q^p - 1) < eps
-    * @tparam Span Тип обертка для пары (указатель, размер массива)
-    * @param solution_h Решение на более мелкой сетке (пара y, y')
-    * @param solution_h Решение на более крупной сетке (пара y, y')
-    * @param tol Допустимая точность
-    * @param order Порядок метода
-    * @param q Отношение размера(количества узлов) большей сетки к меньшей, по умолчанию = 2
-    */
-    template<class Span>
-    bool check_richardson_criterion(
-                                Span Yh,
-                                Span Yh_der,
-                                Span Y2h,
-                                Span Y2h_der,
-                                typename Span::Scalar tol,       
-                                std::size_t order,
-                                std::size_t q=2        
-                            );
-     
-
-
-
-
-
-
-
-
-
-}  //namespace utils
-
 
 #include "odedetail.tpp"

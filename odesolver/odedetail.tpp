@@ -5,8 +5,10 @@
 #include <functional>
 #include <cmath>
 #include <iostream>
+#include <fstream>
 #include "span.hpp"
 #include "alignedbuffer.hpp"
+#include "utils.hpp"
 
 
 namespace ode{
@@ -247,7 +249,7 @@ namespace ode{
         #pragma GCC unroll 4 //Запрещаем разворот цикла более чем на 4, поскольку внутри много template-swap => на O3 проблемы на этапе линковки
         for (std::size_t iter = 0; iter < max_iter; ++iter) {
             kernel(xh2, yh2, ydh2, F, q0, q1);
-            if (utils::check_richardson_criterion(yh2, ydh2, yh, ydh, eps_tol, kernel.order)){ 
+            if (utils::check_richardson_criterion(yh2, ydh2, yh, ydh, eps_tol, kernel.order, ratio)){ 
                 success = true; 
                 break; 
             }
@@ -289,207 +291,94 @@ namespace ode{
             .success= success
         };
         return res;
-}
-    template<std::size_t GridDim, class Span, class Rhs, class Kernel>
+    }
+    
+    template<class Span, class Rhs, class Kernel>
     ReturnBuffer<Span> integrate_freeze(
                                     const Rhs&  F,
                                     typename Span::Scalar a,
                                     typename Span::Scalar b,
                                     typename Span::Scalar q0,
                                     typename Span::Scalar q1,
-                                    Kernel&& kernel
+                                    Kernel&& kernel,
+                                    std::size_t grid_size
                                 ){
-    using Scalar = typename Span::Scalar;
+        using Scalar = typename Span::Scalar;
 
-    AlignedBuffer<Scalar> xh_buf(GridDim);
-    AlignedBuffer<Scalar> yh_buf(GridDim);
-    AlignedBuffer<Scalar> ydh_buf(GridDim);
+        AlignedBuffer<Scalar> xh_buf(grid_size);
+        AlignedBuffer<Scalar> yh_buf(grid_size);
+        AlignedBuffer<Scalar> ydh_buf(grid_size);
 
-    Span xh(xh_buf.data(), xh_buf.size());
-    Span yh(yh_buf.data(), yh_buf.size());
-    Span ydh(ydh_buf.data(), ydh_buf.size());
+        Span xh(xh_buf.data(), xh_buf.size());
+        Span yh(yh_buf.data(), yh_buf.size());
+        Span ydh(ydh_buf.data(), ydh_buf.size());
 
-    utils::fill_uniform_grid(xh, a, b);
-    kernel(xh, yh, ydh, F, q0, q1);
+        utils::fill_uniform_grid(xh, a, b);
+        kernel(xh, yh, ydh, F, q0, q1);
 
-    ReturnBuffer<Span> res{
-        .x_buf  = std::move(xh_buf),
-        .y1_buf = std::move(yh_buf),
-        .y2_buf = std::move(ydh_buf),
-        .success= true
-    };
-    return res;
+        ReturnBuffer<Span> res{
+            .x_buf  = std::move(xh_buf),
+            .y1_buf = std::move(yh_buf),
+            .y2_buf = std::move(ydh_buf),
+            .success= true
+        };
+        return res;
     
-}
+    }
 
+    template<class Span, class Rhs, class Kernel>
+    void compare_results(
+                        const Rhs&  F,
+                        typename Span::Scalar a,
+                        typename Span::Scalar b,
+                        typename Span::Scalar q0,
+                        typename Span::Scalar q1,
+                        Kernel&& kernel,
+                        std::size_t opt_N_h,
+                        const std::string_view& method_name,
+                        const std::string& filename,
+                        bool header
+                    ){
+        std::ofstream out;
+        if (header == true){//Требуется хедер => открываем для перезаписи
+            out.open(filename);
+            if (!out.is_open())
+                throw std::runtime_error("Cannot open " + filename);
+        }
+        else{ //Не требуется => для дозаписи
+            out.open(filename, std::ios::app);
+            if (!out.is_open())
+                throw std::runtime_error("Cannot open " + filename);
+        }
+        using S = typename Span::Scalar;
+        //Количество узлов для сетки с шагом 2h от оптимального
+        const std::size_t opt_N_2h = (opt_N_h - 1) / 2 + 1;
+        //Количество узлов для сетки с шагом h/2 от оптимального
+        const std::size_t opt_N_h2 = 2 * (opt_N_h - 1) + 1;
+                       
+        auto result_2h = ode::integrate_freeze<Span>(F, a, b, q0, q1, kernel, opt_N_2h);
+        auto result_h = ode::integrate_freeze<Span>(F, a, b, q0, q1, kernel, opt_N_h);
+        auto result_h2 = ode::integrate_freeze<Span>(F, a, b, q0, q1, kernel, opt_N_h2);
 
+        //Попарные сравнения
+        auto dev_2h_y1 = utils::deviations(result_2h.y1(), result_h.y1());
+        auto dev_2h_y2 = utils::deviations(result_2h.y2(), result_h.y2());
+        
+        auto dev_h2_y1 = utils::deviations(result_h.y1(), result_h2.y1());
+        auto dev_h2_y2 = utils::deviations(result_h.y2(), result_h2.y2());
 
+        //Оптимальный шаг для записи в файл
+        S h = result_h.x()[1] - result_h.x()[0];
+        utils::write_norms_table<Span>(out, h, std::make_tuple(method_name, "y1_2h", dev_2h_y1), header);
+        utils::write_norms_table<Span>(out, h, std::make_tuple(method_name, "y2_2h", dev_2h_y2), false);
+        utils::write_norms_table<Span>(out, h, std::make_tuple(method_name, "y1_h2", dev_h2_y1), false);
+        utils::write_norms_table<Span>(out, h, std::make_tuple(method_name, "y2_h2", dev_h2_y2), false);
+    }
 
-
-    
-
-    
 
 }   //namespace ode
 
-namespace utils {
-    
-    template<class Span>
-    bool check_richardson_criterion(
-                            Span Yh,
-                            Span Yh_der,
-                            Span Y2h,
-                            Span Y2h_der,
-                            typename Span::Scalar tol,       
-                            std::size_t           order,
-                            std::size_t           q        
-                        ){
-        using S = typename Span::Scalar;
-        const S powq = std::pow(S(q), S(order)); // q^p предвычисление
-        const std::size_t small_size = Y2h.size();
-        const std::size_t big_size = Yh.size();
-        
-        //Создаем беспсевдонимный тип (disable alias type) для потенциального ускорения
-        const S* __restrict big   = Yh.data();
-        const S* __restrict big_d = Yh_der.data();
-        const S* __restrict sml   = Y2h.data();
-        const S* __restrict sml_d = Y2h_der.data();
 
-        //||Yh - Y2h|| без доп выделений памяти
-        S diff_func = S(0), diff_der = S(0); //Инициализация суммы
-        //Параллелизм на уровне данных (Векторизация), так же сообщаем что данные уже выровнены, и инициализируем сумму нулем, каждый векторный сегмент сложит туда свой результат
-        #pragma omp simd aligned(big,big_d,sml,sml_d:64) reduction(+:diff_func,diff_der)
-        for (std::size_t i = 0; i < small_size; ++i) {
-            std::size_t j = i*q;
-            diff_func += std::abs(big[i*q]   - sml  [i]); //Сумма модулей разностей компонент сеток функций (из большей сетки берутся значения с пропуском q)
-            diff_der  += std::abs(big_d[i*q] - sml_d[i]); //Сумма модулей разностей компонент сеток производных (из большей сетки берутся значения с пропуском q)
-            
-        }
-        
-        //||Y_h - Y_2h||/(q^p - 1)
-        S err  = diff_func   / ( S(big_size-1) * (powq - S(1)));
-        S errd = diff_der / ( S(big_size-1) * (powq - S(1))); 
-       
-        return err <= tol; //Можно заменить на максимум из err errd для отслеживания точности производной
-    }
-
-    
-
-
-
-
-
-    template<class Grid>
-    using pack_norms = std::array<typename Grid::Scalar, 6>;
-
-    enum Norms : std::size_t { // Не вызывает никаких накладных расходов, поскольку на этапе компиляции преобразуется в числа
-        L_1_abs,   //0
-        L_2_abs,   //1  
-        L_inf_abs, //2
-        
-        L_1_rel,   //3
-        L_2_rel,   //4
-        L_inf_rel  //5
-    };
-
-    template<class BiggerGrid, class SmallerGrid>
-    pack_norms<BiggerGrid> deviations(const BiggerGrid& bigger, const SmallerGrid& smaller){
-        static_assert((bigger.size - 1) % (smaller.size - 1) == 0, "Grids must be didvided into one another");
-        pack_norms<BiggerGrid> norms;
-        constexpr std::size_t multiplier = (bigger.size - 1) / (smaller.size - 1);
-        SmallerGrid sparse_bigger;
-        
-        //Прорядить сетку для сравнения
-        for(std::size_t i = 0; i < smaller.size; i++)
-            sparse_bigger[i] = bigger[i * multiplier];
-        
-
-        norms[0] = sparse_bigger.calc_1_norm_difference(smaller);
-        norms[1] = sparse_bigger.calc_2_norm_difference(smaller);
-        norms[2] = sparse_bigger.calc_inf_norm_difference(smaller);
-
-        norms[3] = norms[0] / sparse_bigger.l1_norm();
-        norms[4] = norms[1] / sparse_bigger.l2_norm();
-        norms[5] = norms[2] / sparse_bigger.linf_norm(); 
-
-        return norms;
-    }
-
-
-    template <class Span>
-    void write_to_file_grid(std::ofstream &out, Span arr, std::string_view name_arr){
-        out << "\"" << name_arr << "\"" << ": ["; //форматируем файл под json
-        for (std::size_t i = 0; i < arr.size(); ++i) {
-            out << arr[i];
-            if (i != arr.size() - 1) 
-                out << ", ";
-        }
-        out << "]";
-    }
-
-    template <class Pair, class... Rest>
-    void write_data_to_json_impl(std::ofstream &out, const Pair& GridAndName, Rest... rest){
-        write_to_file_grid(out, GridAndName.first, GridAndName.second);
-    
-        if constexpr (sizeof...(rest) > 0) { //Остановка рекурсии
-            out << ",\n";
-            write_data_to_json_impl(out, rest...);
-        }
-
-    }
-
-    template <typename Span>
-    inline void fill_uniform_grid(Span& grid, typename Span::Scalar a, typename Span::Scalar b){
-        const std::size_t size = grid.size();
-        typename Span::Scalar step = std::abs(b - a) / (size - 1);
-        for (std::size_t i = 0; i < size; i++) 
-            grid[i] = a + step * i; // Заполняем значения, включая последний узел, равный b
-        if (grid[size - 1] != b)
-            grid[size - 1] = b;
-    }
-
-    template<class Span>
-    inline void grinding_grid_without_recount(Span grid_old, std::size_t ratio, typename Span::Scalar a, typename Span::Scalar b){
-        //Предвычисления
-        const std::size_t size_old = grid_old.size();
-        const std::size_t size_new = ratio * grid_old.size();
-        const typename Span::Scalar step_new = abs(b - a) / (size_new - 1);
-
-        //Новая сетка
-        typename Span::Scalar* grinded_grid = new typename Span::Scalar[size_new];
-
-        for (std::size_t i = 0; i < size_old - 1; i++) {
-            grinded_grid[i * ratio] = grid_old[i]; // Старая точка
-            for (std::size_t j = 1; j < ratio; j++) { // Заполнение промежуточных точек
-                grinded_grid[i * ratio + j] = grid_old[i] + j * step_new; 
-            }
-        }
-        grinded_grid[size_new - 1] = grid_old[size_old - 1]; // Последняя точка обязана совпадать
-
-        delete [] grid_old.data();
-        //Перезапись данных в том же месте
-        grid_old.reset(grinded_grid, size_new);
-    }
-
-
-
-
-
-
-} // namespace utils
-
-template<class... Pairs>
-void write_data_to_json_file(const std::string& filename, const Pairs&... GridsAndNames){
-    std::ofstream out(filename);
-    if (!out.is_open())
-        throw std::runtime_error("Cannot open " + filename);
-
-    out << "{\n";
-    utils::write_data_to_json_impl(out, GridsAndNames...);
-    out << "\n}\n";
-
-    // out автоматически закроется при выходе из функции
-}
 
 
 

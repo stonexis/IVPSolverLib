@@ -1,12 +1,12 @@
 #include <cmath>
 #include "odesolver.hpp"
-
+#include "utils.hpp"
 using namespace std;
 
 int main(){
     //ДУ
     auto rhs = [](double x, double y1, double y2){return y2 * cos(x) + y1 * sqrt(x + 1) + pow(x,2) - 1;};
-    double q0 = 1.7, q1 = 2.0;
+    double q0 = -4.7, q1 = 4.2;
     double a = 0.0, b = 1.0;
 
     //Требуемая точность
@@ -32,7 +32,20 @@ int main(){
     auto Result_rk4 = ode::integrate_adaptive<5, ali_span<double>>(rhs, a, b, q0, q1, tol, rk4);
     auto Result_adams = ode::integrate_adaptive<11, ali_span<double>>(rhs, a, b, q0, q1, tol, adams);
 
-    auto Freeze_euler = ode::integrate_freeze<25, ali_span<double>>(rhs, a, b, q0, q1, euler);
+    //Оптимальное количество узлов сетки
+    std::size_t opt_N_euler = Result_euler.x().size();
+    std::size_t opt_N_euler_rec = Result_euler_rec.x().size();
+    std::size_t opt_N_rk2 = Result_rk2.x().size();
+    std::size_t opt_N_rk4 = Result_rk4.x().size();
+    std::size_t opt_N_adams = Result_adams.x().size();
+
+    auto Freeze_euler = ode::integrate_freeze<ali_span<double>>(rhs, a, b, q0, q1, euler, 6401);
+    ode::compare_results<ali_span<double>>(rhs, a, b, q0, q1, euler, opt_N_euler, "euler", "norms_table.csv", true);
+    ode::compare_results<ali_span<double>>(rhs, a, b, q0, q1, euler_rec, opt_N_euler_rec, "euler_rec", "norms_table.csv", false);
+    ode::compare_results<ali_span<double>>(rhs, a, b, q0, q1, rk2, opt_N_rk2, "rk2", "norms_table.csv", false);
+    ode::compare_results<ali_span<double>>(rhs, a, b, q0, q1, rk4, opt_N_rk4, "rk4", "norms_table.csv", false);
+    ode::compare_results<ali_span<double>>(rhs, a, b, q0, q1, adams, opt_N_adams, "adams", "norms_table.csv", false);
+
 
 
     write_data_to_json_file(
@@ -64,17 +77,8 @@ int main(){
     );
     cout << "success: " << Result_euler.success << " " << Result_euler.x().size() << " " << Result_euler_rec.success << " " << Result_euler_rec.x().size() << " " << Result_rk2.success << " " << Result_rk2.x().size() << " " << Result_rk4.success << " " << Result_rk4.x().size() << " " << Result_adams.x().size() << '\n';
     cout << Result_euler.x()[1] - Result_euler.x()[0] << " "  << Result_euler_rec.x()[1] - Result_euler_rec.x()[0] <<  " " << Result_rk2.x()[1] - Result_rk2.x()[0] <<  " " << Result_rk4.x()[1] - Result_rk4.x()[0] << " " << Result_adams.x()[1] - Result_adams.x()[0]<<'\n';
+    system("/home/stonexis/PycharmProjects/PythonProject/.venv/bin/python3 printnorms.py");
     system("/home/stonexis/PycharmProjects/PythonProject/.venv/bin/python3 plotter.py");
-    
-
-
-
-
-
-
-
-
-
-
+ 
     return 0;
 }
